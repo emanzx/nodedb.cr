@@ -270,3 +270,144 @@ Not required by the brief's template, but worth knowing for any later task that 
 - Vector text: "[\"0.1\",\"0.2\",\"0.3\"]" (JSON array of quoted strings — NOT pg-standard "{0.1,0.2,0.3}")
 - ErrorResponse fields: S=ERROR C=42P01 M=collection "nonexistent_table_xyz" does not exist
 ```
+
+---
+
+## Task 15 addendum (2026-07-23): SEARCH re-verified, working shape found
+
+The Task 1 spike above left `SEARCH` returning 0 columns/0 rows unexplained. Re-probed
+live via `psql` against `nodedb-test` (localhost:16432) per Task 15's brief. Root
+cause found: **`SEARCH` only returns neighbors once a `CREATE VECTOR INDEX` exists
+over the target column, AND the index binds to that column using a specific
+syntax.**
+
+### The exact binding rule (all four forms tried, live)
+
+| `CREATE VECTOR INDEX` form | Binds to arbitrary column? |
+|---|---|
+| `CREATE VECTOR INDEX idx ON t METRIC cosine DIM n;` (no column mentioned) | No — implicitly binds to a column literally named `embedding` if one exists; if the collection has no `embedding` column, the index is created but inert. |
+| `CREATE VECTOR INDEX idx ON t FIELD col METRIC cosine DIM n;` | **No** — parses without error, `SHOW INDEXES` lists it, but SEARCH still returns 0 rows. Silent no-op. |
+| `CREATE VECTOR INDEX idx ON t(col) METRIC cosine DIM n;` (no space before paren) | **No** — same silent no-op as `FIELD`. |
+| `CREATE VECTOR INDEX idx ON t (col) METRIC cosine DIM n;` (**space before paren**) | **Yes** — this is the only form of the four that actually binds. Confirmed reproducibly across 3 separate collections/columns. |
+
+Once bound correctly, `SEARCH t USING VECTOR(col, ARRAY[...], k)` returns exactly the
+shape you'd expect: columns `id | _surrogate | distance`, ordered by ascending
+distance (closest first), `CommandComplete: SELECT k`. Verified with 2 and 3 rows,
+k=1 and k=2, both a schemaless (`CREATE COLLECTION t;`) and a strict/typed
+(`CREATE COLLECTION t (id TEXT PRIMARY KEY, col FLOAT[]);`) collection — strictness
+was a red herring in earlier isolated tests; the paren-with-space column binding is
+the only variable that mattered.
+
+Sample verified output (3 rows inserted, `k=2`, query point `[0.1,0.2,0.3]`):
+
+```
+ id | _surrogate |       distance
+----+------------+-----------------------
+ a  | 23         | 0.0
+ c  | 25         | 0.0002999998687300831
+(2 rows)
+```
+
+**Builder added:** `NodeDB::SQL::Vector.create_index(name:, table:, column:, dim:, metric: "cosine")`
+in `src/nodedb/sql/vector.cr`, emitting the working `(column)`-with-space form —
+mirrors the existing `NodeDB::SQL::FTS.create_index` pattern. `NodeDB::SQL::Vector.drop_index(name)`
+emits plain `DROP INDEX <name>` (see below — `DROP VECTOR INDEX` is rejected by the
+parser).
+
+### `DROP INDEX` / `DROP VECTOR INDEX` on a vector index
+
+- `DROP VECTOR INDEX idx;` → **parse error** (`Expected: ... INDEX ... after DROP, found: VECTOR`). The vectors.md docs' `DROP VECTOR INDEX idx_name;` syntax does not work on this server; use plain `DROP INDEX <name>` (same statement FTS indexes use).
+- `DROP INDEX idx;` on a vector index → server reports success (`DROP INDEX` command tag, no error) **but the index still appears in `SHOW INDEXES` afterward** — confirmed both while the owning collection still exists and after it's been dropped. This looks like a genuine no-op for the vector-index type specifically (regular/FTS index drop was not re-tested here). Harmless for spec cleanup (throwaway collection/index names), but doesn't actually reclaim the index — flagging for any future task that cares about index lifecycle.
+- Dropping a collection does **not** drop its attached vector index either (same orphaning).
+
+### `GRAPH TRAVERSE` is database-global, not collection-scoped
+
+`NodeDB::SQL::Graph.traverse(from:, depth:, direction:)` has no collection/table
+argument, and this is not a builder omission — the `GRAPH TRAVERSE FROM ... DEPTH n`
+statement itself takes no collection clause. Confirmed live: edges inserted via
+`GRAPH INSERT EDGE IN <collection> FROM 'alice' TO 'bob' ...` are still reachable by
+`GRAPH TRAVERSE FROM 'alice' DEPTH 1` even after `<collection>` is dropped, and
+repeated inserts of the same `'alice'`/`'bob'` node names across unrelated
+collections/runs accumulate into the same global result (observed duplicate edges
+piling up across probe runs during this task). `GRAPH TRAVERSE` returns **one row,
+one column** (`result`), a JSON string like
+`{"nodes":[{"id":"alice","depth":0},{"id":"bob","depth":1}],"edges":[{"from":"alice","to":"bob","label":"knows"}]}`
+— not one row per discovered node as the brief's original spec assumed. The
+brief's `result.should_not be_empty` assertion still passes either way (one non-empty
+row), but the integration spec now also uses randomized node names per run (not
+fixed `'alice'`/`'bob'`) to keep runs independent of this global-graph accumulation,
+and asserts the traversed-to node name appears in the JSON payload.
+
+### `GRAPH INSERT EDGE` command tag
+
+`GRAPH INSERT EDGE IN <collection> FROM ... TO ... TYPE ... PROPERTIES '{}';` returns
+`CommandComplete: INSERT EDGE` (psql's own client can't render this tag —
+"could not interpret result from server: INSERT EDGE" — but this is psql-side
+cosmetics, not a wire error; no `ErrorResponse` is sent, and `db.exec`'s
+`rows_affected` parsing (`tag.split(' ').last.to_i64? || 0`) handles it fine,
+yielding `0`).
+
+### `DESCRIBE` does not always duplicate PK rows
+
+The Task 1 spike / existing unit tests assumed `DESCRIBE` emits two rows for a
+primary-key column (one plain, one suffixed `PRIMARY KEY`). Live `DESCRIBE` on a
+fresh `(id TEXT PRIMARY KEY, total NUMERIC)` collection returned **exactly one row
+per column**, with `PRIMARY KEY` folded into the `id` row's `type` field directly
+(`id | TEXT PRIMARY KEY | false`). `NodeDB::Schema.normalize` already handles both
+shapes correctly (group-by-field + "any dup contains PRIMARY KEY" logic degrades
+gracefully to a group of 1) — no code change needed, but recording since the
+brief's assumption doesn't match what a live single-column-def collection produces.
+
+### CI credentials mechanism (point 4)
+
+- The image has **no baked-in env var for username, database, or a fixed
+  password** (`docker inspect farhansyah/nodedb:0.4.0 | jq '.[0].Config.Env'`
+  shows only `PATH`, `SSL_CERT_FILE`, `NODEDB_HOST`, `NODEDB_DATA_DIR`). Without
+  intervention the superuser password is regenerated on every boot (see the
+  "AUTO-GENERATED SUPERUSER PASSWORD" banner earlier in this doc), which is
+  unusable for CI.
+- **`NODEDB_SUPERUSER_PASSWORD=<value>`** (named directly in that same boot
+  banner: "Override via NODEDB_SUPERUSER_PASSWORD or auth config") presets a
+  deterministic password for the fixed superuser/database pair
+  `user=nodedb dbname=nodedb`. Verified live: booting
+  `docker run -e NODEDB_SUPERUSER_PASSWORD=ci_test_password_123 ...` suppresses
+  the auto-generated-password banner entirely, and `psql`/the full integration
+  suite connect successfully with that exact preset password — no other
+  user/db override mechanism was found or needed (`nodedb`/`nodedb` is fine for
+  a throwaway CI service container).
+- **GH Actions `services:` health-check gotcha:** the image ships a Docker
+  `HEALTHCHECK` (`nodedb healthcheck`, hitting a local `/health` endpoint) that
+  **404s and never reports healthy** on this container, as already noted
+  earlier in this doc from the Task 1 spike ("Docker reports container health
+  as unhealthy ... does not affect the database itself"). GitHub Actions
+  blocks a job's steps until a `services:` container's Docker health check
+  reports healthy, if one is defined — left as-is, the `integration` CI job
+  would hang until the job timeout. Fixed by passing
+  `options: --no-healthcheck` on the service block (verified locally:
+  `docker run --no-healthcheck ...` produces a container with no `Health`
+  field in `docker inspect` at all, i.e. "ready" as soon as it's running) plus
+  an explicit "wait for NodeDB to accept connections" step (`/dev/tcp` TCP
+  probe loop) before running the integration spec, so readiness is verified
+  by an actual connection attempt rather than trusted from container status —
+  matching this doc's own "verify liveness via an actual query" guidance.
+- **CI job added:** `.github/workflows/ci.yml` → `integration` job, pinned to
+  `farhansyah/nodedb:0.4.0` (same tag recorded in this doc), fixed
+  `NODEDB_SUPERUSER_PASSWORD: ci_integration_test_password`,
+  `NODEDB_URL: nodedb://nodedb:ci_integration_test_password@localhost:16432/nodedb`.
+- **Locally verified CI shape:** ran a second, disposable container
+  (`docker run -d --no-healthcheck -p 26432:6432 -e NODEDB_SUPERUSER_PASSWORD=ci_integration_test_password farhansyah/nodedb:0.4.0`)
+  and ran `NODEDB_URL=nodedb://nodedb:ci_integration_test_password@localhost:26432/nodedb crystal spec --tag integration`
+  against it — all 6 integration examples passed. Container removed
+  afterward (`docker rm -f`); the original `nodedb-test` container on 16432
+  was left untouched throughout.
+
+### Collection/index naming in the integration suite (point 5)
+
+Every collection created in `spec/integration/end_to_end_spec.cr` uses a
+`nodedb_cr_spec_<purpose>_<random>` name (random suffix via `Random.rand(1_000_000)`),
+not a bare fixed name, because of the retention-window quirk recorded above in
+this doc (`DROP COLLECTION` is a soft delete; recreating a just-dropped name
+within the retention window raises "... was dropped and is within its retention
+window"). Each spec still drops its collection in an `ensure` block for hygiene,
+it just no longer assumes a fixed name is safe to reuse across repeated runs in
+the same container lifetime. Vector index names are randomized the same way.

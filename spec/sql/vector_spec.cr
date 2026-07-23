@@ -1,6 +1,23 @@
 require "../spec_helper"
 
 describe NodeDB::SQL::Vector do
+  it "builds create_index with the space-before-paren column binding" do
+    NodeDB::SQL::Vector.create_index(name: "idx", table: "articles", column: "embedding", dim: 384)
+      .should eq("CREATE VECTOR INDEX idx ON articles (embedding) METRIC cosine DIM 384")
+    NodeDB::SQL::Vector.create_index(name: "idx", table: "articles", column: "embedding", dim: 3, metric: "l2")
+      .should eq("CREATE VECTOR INDEX idx ON articles (embedding) METRIC l2 DIM 3")
+  end
+
+  it "rejects non-positive dim" do
+    expect_raises(ArgumentError) do
+      NodeDB::SQL::Vector.create_index(name: "idx", table: "t", column: "c", dim: 0)
+    end
+  end
+
+  it "builds drop_index" do
+    NodeDB::SQL::Vector.drop_index("idx").should eq("DROP INDEX idx")
+  end
+
   it "builds SEARCH ... USING VECTOR" do
     sql = NodeDB::SQL::Vector.search(
       table: "articles", column: "embedding",
