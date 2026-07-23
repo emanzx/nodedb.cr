@@ -16,7 +16,8 @@ module NodeDB
       @server_signature : String?
 
       def initialize(@user : String, @password : String,
-                     @nonce : String = Random::Secure.urlsafe_base64(18))
+                     @nonce : String = Random::Secure.urlsafe_base64(18),
+                     @send_username : Bool = false)
       end
 
       def client_first : String
@@ -59,8 +60,12 @@ module NodeDB
         end
       end
 
+      # PostgreSQL convention: empty username on the wire (the server takes
+      # the user from the startup message; libpq sends n= empty too).
+      # send_username exists so the RFC 7677 test vector — which bakes
+      # "n=user" into its AuthMessage — can exercise the same crypto path.
       private def client_first_bare : String
-        "n=#{@user},r=#{@nonce}"
+        "n=#{@send_username ? @user : ""},r=#{@nonce}"
       end
 
       private def hmac(key, data) : Bytes

@@ -7,22 +7,34 @@ RFC_CLIENT_FINAL = "c=biws,r=rOprNGfwEbeRWgbNEkqO%hvYDpWUa2RaTCAfuxFIlj)hNlF$k0,
 RFC_SERVER_FINAL = "v=6rriTRBi23WpRR/wtup+mMhUZUn/dB5nLTJRsjl95G4="
 
 describe NodeDB::Wire::Scram do
-  it "produces client-first with our nonce" do
+  it "produces client-first with empty username by default (pg convention)" do
     scram = NodeDB::Wire::Scram.new(user: "user", password: "pencil", nonce: RFC_CLIENT_NONCE)
+    scram.client_first.should eq("n,,n=,r=#{RFC_CLIENT_NONCE}")
+  end
+
+  it "produces client-first with username in RFC vector mode" do
+    scram = NodeDB::Wire::Scram.new(user: "user", password: "pencil", nonce: RFC_CLIENT_NONCE, send_username: true)
     scram.client_first.should eq("n,,n=user,r=#{RFC_CLIENT_NONCE}")
   end
 
   it "computes the RFC 7677 client proof" do
-    scram = NodeDB::Wire::Scram.new(user: "user", password: "pencil", nonce: RFC_CLIENT_NONCE)
+    scram = NodeDB::Wire::Scram.new(user: "user", password: "pencil", nonce: RFC_CLIENT_NONCE, send_username: true)
     scram.client_first
     scram.client_final(RFC_SERVER_FIRST).should eq(RFC_CLIENT_FINAL)
   end
 
   it "verifies the RFC 7677 server signature" do
-    scram = NodeDB::Wire::Scram.new(user: "user", password: "pencil", nonce: RFC_CLIENT_NONCE)
+    scram = NodeDB::Wire::Scram.new(user: "user", password: "pencil", nonce: RFC_CLIENT_NONCE, send_username: true)
     scram.client_first
     scram.client_final(RFC_SERVER_FIRST)
     scram.verify_server_final(RFC_SERVER_FINAL) # must not raise
+  end
+
+  it "computes a well-formed client-final in default (empty username) mode" do
+    scram = NodeDB::Wire::Scram.new(user: "user", password: "pencil", nonce: RFC_CLIENT_NONCE)
+    scram.client_first
+    final = scram.client_final(RFC_SERVER_FIRST)
+    final.should match(/\Ac=biws,r=rOprNGfwEbeRWgbNEkqO%hvYDpWUa2RaTCAfuxFIlj\)hNlF\$k0,p=[A-Za-z0-9+\/]{43}=\z/)
   end
 
   it "rejects a server nonce that does not extend ours" do
