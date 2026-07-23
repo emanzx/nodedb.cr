@@ -96,6 +96,11 @@ gets from libpq:
   **not** make ORMs work by itself — Granite/Jennifer/Avram each dispatch on registered
   adapter classes with hand-coded dialect/DDL, so each needs its own adapter shard (later,
   out of scope, same as nodedb-ruby's `activerecord-nodedb-adapter` plan).
+- **Implementation reality (2026-07-23):** `Connection#do_close` deliberately skips `super` —
+  the base `DB::Connection#do_close` calls `context.discard(self)`, which mutates the pool's
+  `@total` mid-iteration during `Pool#close`'s bulk `@total.each &.close`, silently leaking
+  sibling connections' sockets; closing the wire directly is documented inline in
+  `src/nodedb/driver.cr`.
 
 ### `NodeDB::SQL` builder modules
 
@@ -103,7 +108,7 @@ Same module map as nodedb-ruby — concepts and docs transfer 1:1:
 
 | Module | Covers |
 |---|---|
-| `NodeDB::SQL::Vector` | similarity search over embeddings |
+| `NodeDB::SQL::Vector` | similarity search over embeddings; also `create_index`/`drop_index` (implementation reality, 2026-07-23 — `SEARCH` returns 0 rows without a bound vector index; only the `(column)` space-before-paren form actually binds, see Decisions log) |
 | `NodeDB::SQL::Graph` | node/edge insert, traversal, algorithms (PageRank) |
 | `NodeDB::SQL::FTS` | full-text `text_match()` search |
 | `NodeDB::SQL::KV` | get/set key-value ops |
@@ -142,8 +147,15 @@ actually serves, verified in integration specs.
 
 Text-format decode of NodeDB's types on top of `NodeDB::Wire`:
 
-- Vectors: NodeDB emits **both** Float4Array (OID 1021) and Float8Array (OID 1022) →
-  `Array(Float32)` / `Array(Float64)`, both supported.
+- **Vectors — implementation reality (2026-07-23):** NodeDB 0.4.0 does not emit a native
+  array/vector OID for `FLOAT[]` columns; they arrive as OID 25 (text) containing a JSON
+  array of stringified floats (e.g. `["0.1","0.2","0.3"]`), not the pg-standard
+  `{0.1,0.2,0.3}` literal this spec originally assumed, and not something `TypeMap.decode`
+  can special-case (a vector column is indistinguishable from any other text column at the
+  OID level). Callers read it `as: String` and parse explicitly via the new
+  `TypeMap.parse_vector`, which returns `Array(Float64)`. OIDs 1021 (Float4Array) / 1022
+  (Float8Array) are kept in `TypeMap.decode`'s case as future-proofing only — dead code
+  against 0.4.0's observed wire behavior, verified in `docs/wire-facts.md`.
 - JSON documents → `JSON::Any`; timestamps → `Time`; unknown OIDs fall back to `String`,
   never raise.
 
@@ -221,3 +233,6 @@ GitHub Actions CI.
 | License | BSD-2-Clause | Match nodedb-ruby — the clients read as a family |
 | Pooling | crystal-db's | Free, standard, battle-tested |
 | ORM story | Per-ORM adapter shards, later | Review: Granite/Jennifer/Avram all need hand-written adapters; crystal-db buys API+pooling only |
+| Vector index builder (2026-07-23, implementation reality) | Added `Vector.create_index`/`drop_index`, emitting the `(column)` space-before-paren form | Live probing (Task 15) found `SEARCH ... USING VECTOR(...)` returns 0 rows without a bound vector index, and that `FIELD column` / `(column)` without a space both parse but silently no-op — only the space-before-paren form binds |
+| Vector column read-back (2026-07-23, implementation reality) | `TypeMap.parse_vector` helper (`Array(Float64)`), not a transparent OID decode | NodeDB 0.4.0 serves `FLOAT[]` as OID 25 text containing JSON, not a distinguishable array/vector OID; 1021/1022 kept in `TypeMap.decode` as future-proofing only |
+| Driver `do_close` (2026-07-23, implementation reality) | Skip `super`; close the wire socket directly | Base `DB::Connection#do_close`'s `context.discard(self)` mutates the pool's `@total` mid-iteration during `Pool#close`, silently leaking sibling connections' sockets |
