@@ -13,30 +13,24 @@ jobs:
 
   integration:
     runs-on: ubuntu-latest
-    services:
-      nodedb:
-        image: farhansyah/nodedb:0.4.0 # pinned tag — see docs/wire-facts.md
-        ports: ["16432:6432"]
-        env:
-          # NODEDB_SUPERUSER_PASSWORD presets a deterministic password for the
-          # fixed `nodedb` superuser/database, instead of the image's default
-          # auto-generated-at-boot password (see docs/wire-facts.md — CI
-          # mechanism section).
-          NODEDB_SUPERUSER_PASSWORD: ci_integration_test_password
-        # The image's baked-in HEALTHCHECK (`nodedb healthcheck`) 404s against
-        # this container's /health endpoint and never reports healthy (see
-        # docs/wire-facts.md) — GitHub Actions "services" blocks a job
-        # waiting for a defined health check to pass, so left as-is this
-        # would hang forever. --no-healthcheck disables Docker's health
-        # gating; the explicit "wait for NodeDB" step below verifies real
-        # liveness (an actual query) instead, matching wire-facts.md's
-        # guidance to ignore container health status.
-        options: >-
-          --no-healthcheck
     steps:
       - uses: actions/checkout@v4
       - uses: crystal-lang/install-crystal@v1
         with: {crystal: latest}
+      # Started as an explicit step, NOT a `services:` block: the image's
+      # baked-in HEALTHCHECK (`nodedb healthcheck`) 404s and never reports
+      # healthy, and GH Actions' services readiness template crashes on
+      # --no-healthcheck containers (`.Config.Healthcheck` stays truthy as
+      # Test=NONE while `.State.Health` disappears → "map has no entry for
+      # key Health"). A plain docker run + the TCP wait below sidesteps the
+      # whole readiness machinery; see docs/wire-facts.md.
+      # NODEDB_SUPERUSER_PASSWORD presets a deterministic password for the
+      # fixed `nodedb` superuser/database (wire-facts.md — CI mechanism).
+      - name: Start NodeDB
+        run: >-
+          docker run -d --name nodedb -p 16432:6432
+          -e NODEDB_SUPERUSER_PASSWORD=ci_integration_test_password
+          farhansyah/nodedb:0.4.0
       - run: shards install
       - name: Wait for NodeDB to accept connections
         run: |
