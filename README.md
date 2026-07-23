@@ -169,8 +169,22 @@ NodeDB::SQL::Collection.create("metrics", engine: "timeseries",
 `NodeDB::Schema` wraps `DESCRIBE` / `SHOW COLLECTIONS` with typed columns:
 
 ```crystal
-NodeDB::Schema.columns(db, "articles") # => Array(NodeDB::Schema::Column) (name, type, pg_type, oid, nullable, primary_key)
-NodeDB::Schema.collections(db)         # => Array(String)
+require "db"
+require "nodedb"
+
+DB.open("nodedb://nodedb:password@localhost:6432/nodedb") do |db|
+  db.exec NodeDB::SQL::Collection.create("articles",
+    columns: ["id TEXT PRIMARY KEY", "embedding FLOAT[]"])
+
+  cols = NodeDB::Schema.columns(db, "articles")
+  cols.each { |c| puts "#{c.name}: #{c.type} (oid #{c.oid}, pk=#{c.primary_key})" }
+  # => id: TEXT (oid 25, pk=true)
+  # => embedding: FLOAT[] (oid 25, pk=false)
+
+  puts NodeDB::Schema.collections(db).includes?("articles") # => true
+
+  db.exec NodeDB::SQL::Collection.drop_if_exists("articles")
+end
 ```
 
 ## Compatibility
