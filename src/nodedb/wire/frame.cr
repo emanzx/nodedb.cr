@@ -42,6 +42,7 @@ module NodeDB
         type = io.read_byte || raise ConnectionError.new("server closed connection")
         begin
           length = io.read_bytes(Int32, IO::ByteFormat::BigEndian)
+          raise ConnectionError.new("invalid frame length #{length}") if length < 4
           body = Bytes.new(length - 4)
           io.read_fully(body)
         rescue IO::EOFError
@@ -81,7 +82,10 @@ module NodeDB
       def self.parse_error(body : Bytes) : {severity: String, code: String, message: String}
         severity = code = message = ""
         io = IO::Memory.new(body)
-        while (field_type = io.read_byte) && field_type != 0
+        loop do
+          field_type = io.read_byte
+          raise ConnectionError.new("malformed frame: unterminated ErrorResponse") if field_type.nil?
+          break if field_type == 0
           value = read_cstring(io)
           case field_type.chr
           when 'S' then severity = value

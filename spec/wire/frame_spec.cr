@@ -109,4 +109,19 @@ describe NodeDB::Wire::Frame do
     NodeDB::Wire::Frame.write_terminate(io)
     io.to_slice.should eq(Bytes['X'.ord.to_u8, 0_u8, 0_u8, 0_u8, 4_u8])
   end
+
+  it "raises ConnectionError on ErrorResponse body missing its terminator" do
+    body = IO::Memory.new
+    body << 'S' << "ERROR" << '\0' # one field, then body ends with no 0 terminator
+    expect_raises(NodeDB::ConnectionError, /unterminated ErrorResponse/) do
+      NodeDB::Wire::Frame.parse_error(body.to_slice)
+    end
+  end
+
+  it "raises ConnectionError on a hostile frame length" do
+    raw = Bytes['Z'.ord.to_u8, 0_u8, 0_u8, 0_u8, 0_u8] # length 0 < 4
+    expect_raises(NodeDB::ConnectionError, /invalid frame length/) do
+      NodeDB::Wire::Frame.read(IO::Memory.new(raw))
+    end
+  end
 end
