@@ -10,6 +10,7 @@ require "./nodedb/sql/spatial"
 require "./nodedb/sql/collection"
 require "./nodedb/wire/frame"
 require "./nodedb/wire/scram"
+require "./nodedb/wire/connection"
 
 module NodeDB
   VERSION = "0.1.0"
