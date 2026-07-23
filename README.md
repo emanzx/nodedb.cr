@@ -220,9 +220,11 @@ end
     without the space both parse but silently no-op.
   - `DROP INDEX` on a vector index reports success but does not remove it
     from `SHOW INDEXES` — best-effort cleanup only.
-  - `DROP COLLECTION` is a soft delete with a retention window: querying a
-    just-dropped collection name raises instead of "does not exist"
-    (recreating it fresh with `CREATE COLLECTION` works immediately).
+  - `DROP COLLECTION` is a soft delete with a retention window: dropping a
+    collection puts its name in retention; re-creating or querying a just-dropped
+    name MAY raise a "was dropped and is within its retention window" error
+    depending on server state. Use fresh (e.g. randomized) collection names in
+    tests and scripts — this shard's own integration specs do exactly that.
   - `ErrorResponse` only ever populates `S`/`C`/`M` (severity/sqlstate/message)
     — no Detail/Hint/Position.
   - `GRAPH TRAVERSE` is database-global, not collection-scoped (see above).

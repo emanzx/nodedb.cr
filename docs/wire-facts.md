@@ -257,7 +257,7 @@ Captured via the raw wire probe for cross-reference:
 ```
 ERROR:  collection "spike_t" was dropped and is within its retention window; restore it with `UNDROP COLLECTION spike_t` before it is hard-deleted
 ```
-Not required by the brief's template, but worth knowing for any later task that drops/recreates collections by the same name within one container's lifetime — reuse a fresh name (e.g. `spike_t2`) if a truly-gone collection is needed, or issue `UNDROP COLLECTION <name>` first.
+Not required by the brief's template, but worth knowing for any later task that drops/recreates collections by the same name within one container's lifetime — reuse a fresh name (e.g. `spike_t2`) if a truly-gone collection is needed, or issue `UNDROP COLLECTION <name>` first. A later probe (Task 16, 2026-07-23) observed immediate re-creation succeeding in back-to-back operations — behavior is timing/state-dependent; treat re-creation of just-dropped names as unreliable and prefer fresh names.
 
 ## Structured summary (per brief's template)
 
