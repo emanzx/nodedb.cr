@@ -7,6 +7,7 @@ require "./nodedb/sql/fts"
 require "./nodedb/sql/kv"
 require "./nodedb/sql/timeseries"
 require "./nodedb/sql/spatial"
+require "./nodedb/sql/collection"
 
 module NodeDB
   VERSION = "0.1.0"
