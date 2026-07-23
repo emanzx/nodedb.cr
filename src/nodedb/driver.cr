@@ -40,8 +40,14 @@ module NodeDB
       Statement.new(self, query)
     end
 
+    # Deliberately does NOT call super: the base do_close runs
+    # context.discard(self), which deletes from the pool's @total while
+    # Pool#close is iterating it (@total.each &.close) — skipping every
+    # other connection and leaking their sockets. Pool#close resets its
+    # bookkeeping in bulk right after the loop, so closing the wire is
+    # all that's needed here. Residual: a standalone Connection#close
+    # outside Database#close skips pool bookkeeping — rare, accepted.
     protected def do_close
-      super
       @wire.close
     end
   end

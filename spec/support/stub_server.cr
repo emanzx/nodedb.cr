@@ -6,6 +6,7 @@ require "../../src/nodedb"
 class StubServer
   alias Row = Array(String?)
   getter port : Int32
+  @terminates = Atomic(Int32).new(0)
 
   # queries: sql => {fields, rows} served on match; anything else → ErrorResponse
   def initialize(@queries : Hash(String, {Array(NodeDB::Wire::Field), Array(Row)}))
@@ -16,6 +17,10 @@ class StubServer
 
   def close
     @server.close
+  end
+
+  def terminate_count : Int32
+    @terminates.get
   end
 
   private def accept_loop
@@ -37,7 +42,9 @@ class StubServer
       type, body = NodeDB::Wire::Frame.read(io)
       case type
       when 'Q' then serve_query(io, String.new(body[0, body.size - 1]))
-      when 'X' then break
+      when 'X'
+        @terminates.add(1)
+        break
       end
     end
   rescue IO::Error

@@ -94,4 +94,19 @@ describe NodeDB::Driver do
     end
     server.close
   end
+
+  it "closes every pooled connection on db.close" do
+    server = stub_with({
+      "SELECT 1" => {[NodeDB::Wire::Field.new("n", 23, 0_i16)], [["1"] of String?]},
+    })
+    db = DB.open("nodedb://u@127.0.0.1:#{server.port}/d?initial_pool_size=3")
+    db.query_one("SELECT 1", as: Int32).should eq(1)
+    db.close
+    20.times do
+      break if server.terminate_count == 3
+      sleep 0.05.seconds
+    end
+    server.terminate_count.should eq(3)
+    server.close
+  end
 end
