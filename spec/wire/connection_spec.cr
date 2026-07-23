@@ -52,4 +52,25 @@ describe NodeDB::Wire::Connection do
     conn.close
     server.close
   end
+
+  it "raises ConnectionError and cleans up when the server demands unsupported auth" do
+    server = TCPServer.new("127.0.0.1", 0)
+    port = server.local_address.port
+    spawn do
+      if client = server.accept?
+        len = client.read_bytes(Int32, IO::ByteFormat::BigEndian)
+        client.skip(len - 4)
+        body = IO::Memory.new
+        body.write_bytes(3_i32, IO::ByteFormat::BigEndian) # AuthenticationCleartextPassword
+        client.write_byte 'R'.ord.to_u8
+        client.write_bytes(body.size.to_i32 + 4, IO::ByteFormat::BigEndian)
+        client.write(body.to_slice)
+        client.flush
+      end
+    end
+    expect_raises(NodeDB::ConnectionError, /unsupported auth method/) do
+      NodeDB::Wire::Connection.new("127.0.0.1", port, user: "u", database: "d")
+    end
+    server.close
+  end
 end

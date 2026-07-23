@@ -15,11 +15,16 @@ module NodeDB
       def initialize(host : String, port : Int32, user : String, database : String,
                      password : String? = nil)
         @socket = connect(host, port)
-        @socket.sync = false
-        Frame.write_startup(@socket, user: user, database: database)
-        authenticate(user, password)
-        wait_ready
-        check_server_version
+        begin
+          @socket.sync = false
+          Frame.write_startup(@socket, user: user, database: database)
+          authenticate(user, password)
+          wait_ready
+          check_server_version
+        rescue e
+          @socket.close rescue nil
+          raise e
+        end
       end
 
       private def connect(host : String, port : Int32) : TCPSocket
