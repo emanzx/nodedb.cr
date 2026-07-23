@@ -9,6 +9,7 @@ require "./nodedb/sql/timeseries"
 require "./nodedb/sql/spatial"
 require "./nodedb/sql/collection"
 require "./nodedb/wire/frame"
+require "./nodedb/wire/scram"
 
 module NodeDB
   VERSION = "0.1.0"
