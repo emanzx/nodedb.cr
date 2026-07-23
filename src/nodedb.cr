@@ -12,6 +12,7 @@ require "./nodedb/wire/frame"
 require "./nodedb/wire/scram"
 require "./nodedb/wire/connection"
 require "./nodedb/type_map"
+require "./nodedb/schema"
 
 module NodeDB
   VERSION = "0.1.0"
