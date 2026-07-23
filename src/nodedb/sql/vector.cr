@@ -13,7 +13,7 @@ module NodeDB
                             dim : Int32, metric : String = "cosine") : String
         raise ArgumentError.new("dim must be positive") unless dim.positive?
         "CREATE VECTOR INDEX #{Quoting.identifier(name)} ON #{Quoting.identifier(table)} " \
-        "(#{Quoting.identifier(column)}) METRIC #{metric} DIM #{dim}"
+        "(#{Quoting.identifier(column)}) METRIC #{Quoting.identifier(metric)} DIM #{dim}"
       end
 
       # `DROP INDEX` (not `DROP VECTOR INDEX` — the latter is rejected by the

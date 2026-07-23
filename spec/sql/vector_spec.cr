@@ -49,4 +49,11 @@ describe NodeDB::SQL::Vector do
         embedding: [1.0] of Float64, limit: 0)
     end
   end
+
+  it "validates the metric identifier in create_index" do
+    expect_raises(ArgumentError) do
+      NodeDB::SQL::Vector.create_index(name: "idx", table: "t", column: "c",
+        metric: "cosine); DROP COLLECTION x; --", dim: 3)
+    end
+  end
 end
