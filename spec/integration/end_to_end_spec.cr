@@ -121,9 +121,17 @@ describe "nodedb.cr end-to-end", tags: "integration" do
       name = "nodedb_cr_spec_schema_#{Random.rand(1_000_000)}"
       begin
         db.exec NodeDB::SQL::Collection.create(name,
-          columns: ["id TEXT PRIMARY KEY", "total NUMERIC"])
+          columns: ["id TEXT PRIMARY KEY", "total NUMERIC", "n INT"])
+        db.exec "INSERT INTO #{name} (id, total, n) VALUES ($1, $2, $3)", "a", 1.5, 42
         cols = NodeDB::Schema.columns(db, name)
         cols.find! { |c| c.name == "id" }.primary_key.should be_true
+        # INT-family DDL types resolve to NodeDB's actual wire-level integer
+        # width — OID 20 (int8/bigint), not Postgres's 4-byte int4 (OID 23).
+        # See docs/wire-facts.md ("Fix 2 addendum").
+        n_col = cols.find! { |c| c.name == "n" }
+        n_col.pg_type.should eq("bigint")
+        n_col.oid.should eq(20)
+        db.query_one("SELECT n FROM #{name}", as: Int64).should eq(42_i64)
         NodeDB::Schema.collections(db).should contain(name)
       ensure
         db.exec NodeDB::SQL::Collection.drop_if_exists(name)

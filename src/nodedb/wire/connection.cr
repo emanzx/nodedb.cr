@@ -30,7 +30,10 @@ module NodeDB
       private def connect(host : String, port : Int32) : TCPSocket
         TCPSocket.new(host, port)
       rescue e : Socket::ConnectError
-        raise ConnectionError.new("cannot connect to #{host}:#{port}: #{e.message}")
+        # DB::ConnectionRefused (not NodeDB::ConnectionError) so crystal-db's
+        # pool retry logic recognizes a failed-to-establish connection and
+        # can retry pool-establish instead of surfacing a raw driver error.
+        raise ::DB::ConnectionRefused.new("cannot connect to #{host}:#{port}: #{e.message}")
       end
 
       def query(sql : String) : Result
@@ -46,7 +49,9 @@ module NodeDB
           case type
           when 'T' then fields = Frame.parse_row_description(body)
           when 'D' then rows << Frame.parse_data_row(body)
-          when 'C' then command_tag = String.new(body[0, body.size - 1]) if command_tag.empty?
+          when 'C'
+            # first CommandComplete wins — multi-statement strings are unsupported (see README)
+            command_tag = String.new(body[0, body.size - 1]) if command_tag.empty?
           when 'E'
             parsed = Frame.parse_error(body)
             error ||= QueryError.new(parsed[:message], parsed[:code])

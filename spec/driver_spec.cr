@@ -95,6 +95,25 @@ describe NodeDB::Driver do
     server.close
   end
 
+  it "maps a mid-query connection drop to DB::ConnectionLost" do
+    server = DropOnQueryServer.new
+    DB.open("nodedb://u@127.0.0.1:#{server.port}/d?max_pool_size=1") do |db|
+      raw = db.checkout
+      begin
+        expect_raises(DB::ConnectionLost) { raw.query_one("SELECT 1", as: Int32) }
+      ensure
+        raw.close rescue nil
+      end
+    end
+    server.close
+  end
+
+  it "raises DB::ConnectionRefused when nothing listens" do
+    expect_raises(DB::ConnectionRefused) do
+      DB.open("nodedb://u@127.0.0.1:1/d") { |db| db.exec("SELECT 1") }
+    end
+  end
+
   it "closes every pooled connection on db.close" do
     server = stub_with({
       "SELECT 1" => {[NodeDB::Wire::Field.new("n", 23, 0_i16)], [["1"] of String?]},

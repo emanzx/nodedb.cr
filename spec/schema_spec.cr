@@ -30,4 +30,11 @@ describe NodeDB::Schema do
     NodeDB::Schema.normalize(rows).map(&.name).should eq(["x"])
     NodeDB::Schema.normalize(rows, internal: true).map(&.name).should eq(["__v", "x"])
   end
+
+  it "resolves an INT column to the observed wire oid (bigint, not int4)" do
+    cols = NodeDB::Schema.normalize([row("n", "INT")])
+    n = cols.find! { |c| c.name == "n" }
+    n.pg_type.should eq("bigint")
+    n.oid.should eq(20)
+  end
 end

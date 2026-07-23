@@ -99,3 +99,79 @@ class StubServer
     io.flush
   end
 end
+
+# Minimal in-process pgwire server that completes trust auth normally
+# (including answering `SHOW server_version` so `Wire::Connection#initialize`
+# succeeds), then abruptly closes the socket the instant it receives any
+# *other* simple-Query ('Q') frame — simulating a mid-query transport failure
+# (socket died, server restarted) for driver_spec's DB::ConnectionLost
+# mapping test. Frame bytes copied from StubServer above.
+class DropOnQueryServer
+  getter port : Int32
+
+  def initialize
+    @server = TCPServer.new("127.0.0.1", 0)
+    @port = @server.local_address.port
+    spawn { accept_loop }
+  end
+
+  def close
+    @server.close
+  end
+
+  private def accept_loop
+    while client = @server.accept?
+      spawn handle(client)
+    end
+  rescue IO::Error
+  end
+
+  private def handle(io : TCPSocket)
+    len = io.read_bytes(Int32, IO::ByteFormat::BigEndian)
+    io.skip(len - 4)
+    send(io, 'R') { |b| b.write_bytes(0_i32, IO::ByteFormat::BigEndian) }
+    send(io, 'S') { |b| b << "server_version" << '\0' << "NodeDB 0.4.0" << '\0' }
+    send(io, 'Z') { |b| b << 'I' }
+
+    loop do
+      type, body = NodeDB::Wire::Frame.read(io)
+      break unless type == 'Q'
+      sql = String.new(body[0, body.size - 1])
+      if sql == "SHOW server_version"
+        send(io, 'T') do |b|
+          b.write_bytes(1_i16, IO::ByteFormat::BigEndian)
+          b << "server_version" << '\0'
+          b.write_bytes(0_i32, IO::ByteFormat::BigEndian)
+          b.write_bytes(0_i16, IO::ByteFormat::BigEndian)
+          b.write_bytes(25_i32, IO::ByteFormat::BigEndian)
+          b.write_bytes(0_i16, IO::ByteFormat::BigEndian)
+          b.write_bytes(-1_i32, IO::ByteFormat::BigEndian)
+          b.write_bytes(0_i16, IO::ByteFormat::BigEndian)
+        end
+        send(io, 'D') do |b|
+          b.write_bytes(1_i16, IO::ByteFormat::BigEndian)
+          value = "NodeDB 0.4.0"
+          b.write_bytes(value.bytesize.to_i32, IO::ByteFormat::BigEndian)
+          b << value
+        end
+        send(io, 'C') { |b| b << "SELECT 1" << '\0' }
+        send(io, 'Z') { |b| b << 'I' }
+      else
+        io.close # abrupt drop, no response at all — the case under test
+        break
+      end
+    end
+  rescue IO::Error
+  ensure
+    io.close rescue nil
+  end
+
+  private def send(io, type : Char, & : IO::Memory ->)
+    body = IO::Memory.new
+    yield body
+    io.write_byte type.ord.to_u8
+    io.write_bytes(body.size.to_i32 + 4, IO::ByteFormat::BigEndian)
+    io.write(body.to_slice)
+    io.flush
+  end
+end

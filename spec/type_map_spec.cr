@@ -56,6 +56,19 @@ describe NodeDB::TypeMap do
     NodeDB::TypeMap.resolve("wat").should eq({"text", 25})
   end
 
+  it "resolves INT-family DDL types to their observed wire OIDs" do
+    # Live-probed 2026-07-23 (docs/wire-facts.md, Fix 2 addendum): NodeDB has
+    # one native wire-level integer width (OID 20 / int8); SMALLINT/INT2 are
+    # not native ints on the wire at all — they arrive as OID 25 (text).
+    NodeDB::TypeMap.resolve("INT").should eq({"bigint", 20})
+    NodeDB::TypeMap.resolve("INTEGER").should eq({"bigint", 20})
+    NodeDB::TypeMap.resolve("INT4").should eq({"bigint", 20})
+    NodeDB::TypeMap.resolve("BIGINT").should eq({"bigint", 20})
+    NodeDB::TypeMap.resolve("INT8").should eq({"bigint", 20})
+    NodeDB::TypeMap.resolve("SMALLINT").should eq({"text", 25})
+    NodeDB::TypeMap.resolve("INT2").should eq({"text", 25})
+  end
+
   it "parses NodeDB vector text (JSON array of strings)" do
     NodeDB::TypeMap.parse_vector(%(["0.1","0.2","0.3"])).should eq([0.1, 0.2, 0.3])
   end

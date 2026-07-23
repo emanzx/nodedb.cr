@@ -228,6 +228,11 @@ end
   - `ErrorResponse` only ever populates `S`/`C`/`M` (severity/sqlstate/message)
     — no Detail/Hint/Position.
   - `GRAPH TRAVERSE` is database-global, not collection-scoped (see above).
+  - NodeDB's `INSERT` command tag is `OK` (not Postgres's `INSERT 0 1`), so
+    `db.exec(...).rows_affected` is always `0` for inserts.
+  - Multi-statement query strings sent over the simple protocol return all
+    rows merged together but only the **first** command tag is kept — send
+    one statement per `db.exec`/`db.query` call.
 
 ## Roadmap
 

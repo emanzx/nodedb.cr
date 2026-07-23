@@ -62,12 +62,22 @@ module NodeDB
     end
 
     protected def perform_query(args : Enumerable) : ::DB::ResultSet
-      ResultSet.new(self, conn.query(substitute(command, args)))
+      ResultSet.new(self, wire_query(substitute(command, args)))
     end
 
     protected def perform_exec(args : Enumerable) : ::DB::ExecResult
-      result = conn.query(substitute(command, args))
+      result = wire_query(substitute(command, args))
       ::DB::ExecResult.new(rows_affected(result.command_tag), 0_i64)
+    end
+
+    # Transport failures (socket died, server restarted) become ConnectionLost
+    # so crystal-db's pool closes the connection and can retry, instead of
+    # returning a dead connection to the idle set. Server-reported errors
+    # (QueryError) pass through untouched.
+    private def wire_query(sql : String) : Wire::Result
+      conn.query(sql)
+    rescue e : NodeDB::ConnectionError | IO::Error
+      raise ::DB::ConnectionLost.new(connection)
     end
 
     # Client-side $n substitution. Simple protocol has no binds; values are

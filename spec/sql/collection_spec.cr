@@ -37,6 +37,11 @@ describe NodeDB::SQL::Collection do
     end
   end
 
+  it "escapes a quote inside the engine name instead of injecting it" do
+    NodeDB::SQL::Collection.create("t", engine: "x'y")
+      .should eq("CREATE COLLECTION t WITH (engine='x''y')")
+  end
+
   it "builds drop/show/describe" do
     NodeDB::SQL::Collection.drop("t").should eq("DROP COLLECTION t")
     NodeDB::SQL::Collection.drop_if_exists("t").should eq("DROP COLLECTION IF EXISTS t")

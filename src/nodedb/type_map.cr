@@ -12,8 +12,13 @@ module NodeDB
       "TEXT" => {"text", 25}, "VARCHAR" => {"character varying", 1043},
       "FLOAT" => {"double precision", 701}, "FLOAT4" => {"real", 700},
       "FLOAT8" => {"double precision", 701}, "DOUBLE" => {"double precision", 701},
-      "INTEGER" => {"integer", 23}, "INT" => {"integer", 23}, "INT4" => {"integer", 23},
-      "INT2" => {"smallint", 21}, "SMALLINT" => {"smallint", 21},
+      # NodeDB 0.4.0 wire reality (live-probed 2026-07-23, see docs/wire-facts.md
+      # "Fix 2 addendum"): every integer-ish DDL type except SMALLINT/INT2
+      # arrives on the wire as OID 20 (int8/bigint) — NodeDB has one native
+      # wire-level integer width. SMALLINT/INT2 arrive as OID 25 (text), not
+      # a native 2-byte int type at all.
+      "INTEGER" => {"bigint", 20}, "INT" => {"bigint", 20}, "INT4" => {"bigint", 20},
+      "INT2" => {"text", 25}, "SMALLINT" => {"text", 25},
       "INT8" => {"bigint", 20}, "BIGINT" => {"bigint", 20},
       "BOOLEAN" => {"boolean", 16}, "BOOL" => {"boolean", 16},
       "TIMESTAMP" => {"timestamp without time zone", 1114},

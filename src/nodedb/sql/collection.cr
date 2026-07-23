@@ -43,10 +43,10 @@ module NodeDB
         return nil if effective.nil? && opts.empty?
 
         pairs = [] of String
-        pairs << "engine='#{effective}'" if effective
+        pairs << "engine=#{Quoting.string(effective)}" if effective
         opts.each do |key, value|
           Quoting.identifier(key)
-          pairs << "#{key}='#{value.gsub("'", "''")}'"
+          pairs << "#{key}=#{Quoting.string(value)}"
         end
         "WITH (#{pairs.join(", ")})"
       end

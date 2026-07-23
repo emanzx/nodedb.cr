@@ -411,3 +411,68 @@ within the retention window raises "... was dropped and is within its retention
 window"). Each spec still drops its collection in an `ensure` block for hygiene,
 it just no longer assumes a fixed name is safe to reuse across repeated runs in
 the same container lifetime. Vector index names are randomized the same way.
+
+---
+
+## Final-review Fix 2 addendum (2026-07-23): INT family OIDs, live-probed
+
+`nodedb-test` (localhost:16432, the persistent container recorded above) was found
+**stuck** before this probe could run against it: any `CREATE COLLECTION` timed out
+with `metadata propose: configuration error: metadata propose timed out after 5s
+waiting for log index NNN (current: 2)` (NNN climbing by one on every retry —
+648, 649, 650...). Root cause per the container's own logs: a permanently-rejected
+metadata-apply at Raft log index 3, recurring every few minutes —
+`descriptor version anomaly for 'spike_t': replicated version 1 is inconsistent
+with local prior 1 (expected 1 or prior+1)` — left over from this doc's own
+earlier `spike_t` spiking (Task 1 / Task 16 addenda above). Plain `SELECT 1`
+queries against `nodedb-test` still worked (auth was fine), but every DDL
+(`CREATE COLLECTION`) failed identically against two independent collection
+names, confirming the applier is wedged, not transiently busy. Falling back to
+this doc's own documented CI mechanism: a disposable container,
+`docker run -d --name nodedb-fixprobe --no-healthcheck -p 26432:6432 -e
+NODEDB_SUPERUSER_PASSWORD=ci_integration_test_password farhansyah/nodedb:0.4.0`,
+used for this probe (and for the rest of the final-review verification work),
+then removed. `nodedb-test` was left running, untouched, in its stuck state, as
+instructed (out of scope for this fix to repair).
+
+**Probe:** `CREATE COLLECTION fixprobe_ints (id TEXT PRIMARY KEY, a INT, b
+INTEGER, c INT4, d BIGINT, e INT8, f SMALLINT, g INT2)`, one row inserted
+(`1,2,3,4,5,6,7`), then `SELECT id, a, b, c, d, e, f, g FROM fixprobe_ints`
+via a small Crystal script speaking through `NodeDB::Wire::Connection` directly
+(prints `Wire::Field.oid` per column — the authoritative source, same method
+this doc's Task 1 spike used).
+
+Observed `RowDescription` OIDs:
+
+| DDL type declared | column | OID observed | meaning |
+|---|---|---|---|
+| `INT`      | `a` | **20** | int8/bigint |
+| `INTEGER`  | `b` | **20** | int8/bigint |
+| `INT4`     | `c` | **20** | int8/bigint |
+| `BIGINT`   | `d` | **20** | int8/bigint |
+| `INT8`     | `e` | **20** | int8/bigint |
+| `SMALLINT` | `f` | **25** | text (not int2!) |
+| `INT2`     | `g` | **25** | text (not int2!) |
+
+Re-verified independently on a second throwaway collection
+(`fixprobe_ints2`, `f SMALLINT, g INT2` only, values `100, 200`) — same
+result, `oid=25` for both, row values `["100", "200"]` (plain decimal text,
+no quoting/JSON wrapping).
+
+**Two findings, both surprising relative to the pre-fix `NAME_MAP`:**
+
+1. **Every integer DDL type except `SMALLINT`/`INT2` collapses to OID 20
+   (int8/bigint) on the wire.** NodeDB apparently has exactly one native
+   wire-level integer width; `INT`/`INTEGER`/`INT4` are not 4-byte `int4`
+   (OID 23) as the pre-fix `NAME_MAP` assumed — this matches (and generalizes)
+   the `n INT → OID 20` finding already recorded earlier in this doc from the
+   Task 1 spike.
+2. **`SMALLINT`/`INT2` are NOT a native wire integer type at all — they arrive
+   as OID 25 (text).** This is new: nothing earlier in this doc had probed
+   `SMALLINT`/`INT2` specifically. `NodeDB::TypeMap::NAME_MAP` updated
+   accordingly (`src/nodedb/type_map.cr`): `INT`/`INTEGER`/`INT4`/`BIGINT`/`INT8`
+   → `{"bigint", 20}`; `SMALLINT`/`INT2` → `{"text", 25}`.
+
+Throwaway collections (`fixprobe_ints`, `fixprobe_ints2`) were dropped after
+the probe; the disposable `nodedb-fixprobe` container was removed
+(`docker rm -f`) once the final-review verification work finished.
