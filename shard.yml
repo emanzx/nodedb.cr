@@ -1,0 +1,13 @@
+name: nodedb
+version: 0.1.0
+description: |
+  Crystal client for NodeDB — crystal-db driver (pgwire) plus SQL builders
+  for vector, graph, FTS, KV, timeseries, spatial, and collection DDL.
+authors:
+  - emanzx <emanzx@gmail.com>
+license: BSD-2-Clause
+crystal: ">= 1.14.0"
+dependencies:
+  db:
+    github: crystal-lang/crystal-db
+    version: ~> 0.13
