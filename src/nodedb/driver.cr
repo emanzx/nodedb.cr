@@ -41,6 +41,7 @@ module NodeDB
     end
 
     protected def do_close
+      super
       @wire.close
     end
   end
@@ -135,9 +136,6 @@ module NodeDB
     # consume, used for ColumnTypeMismatchError reporting.
     def next_column_index : Int32
       @column_index
-    end
-
-    protected def do_close
     end
   end
 end
