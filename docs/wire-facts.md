@@ -73,9 +73,20 @@ docker run -d --name nodedb-test -p 16432:6432 -p 16433:6433 farhansyah/nodedb:0
 
 ## Auth / connect (the winning connection)
 
+> **CONTAINER RECREATED 2026-07-23 (post-v0.1.0-fixes):** the original container's
+> Raft metadata log wedged permanently (every `CREATE COLLECTION` timed out with
+> `metadata propose timed out ... waiting for log index 652 (current: 2)`; a
+> `docker restart` did not heal it). `nodedb-test` was recreated fresh with the
+> deterministic-password mechanism CI uses, so the credentials below are now
+> stable across restarts and re-creations:
+> `docker run -d --name nodedb-test -p 16432:6432 -p 16433:6433 -e NODEDB_SUPERUSER_PASSWORD=ci_integration_test_password farhansyah/nodedb:0.4.0`
+> **Current password: `ci_integration_test_password`** (the auto-generated
+> `CpUb8WB8XRncTHmuKZPTfovE` below is DEAD — kept only as the verbatim first-boot
+> capture). Integration suite re-verified 6/6 green against the fresh container.
+
 - **Connect:** `host=localhost port=16432 user=nodedb dbname=nodedb`
 - **Auth mode:** `scram-sha-256` (confirmed at the wire level, not just from the log's "Password" label — see below). psql connects transparently via `PGPASSWORD` env var; no `sslmode` needed (plain TCP, no TLS offered — psql's default `sslmode=prefer` silently falls back).
-- **Password:** `CpUb8WB8XRncTHmuKZPTfovE` (auto-generated on first boot of *this* container instance; see the "no restart policy" caveat above — this exact string is only valid for this running container).
+- **Password:** `CpUb8WB8XRncTHmuKZPTfovE` (auto-generated on first boot of the ORIGINAL container instance — superseded by the recreation note above; this string no longer works).
 - First psql attempt in the brief's order (`user=nodedb dbname=nodedb`) connected successfully — no need to fall back to `user=postgres dbname=postgres` (that one also happens to work, since `nodedb` is superuser and `postgres`-named db/role are accepted too, but `user=nodedb dbname=nodedb` is the recorded winner).
 - **Wire-level auth confirmation:** a raw pgwire probe (Python, see Method below) sent the StartupMessage and read the first `AuthenticationRequest` message before any password was sent:
   ```
