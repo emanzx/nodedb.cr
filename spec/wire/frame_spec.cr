@@ -87,4 +87,26 @@ describe NodeDB::Wire::Frame do
     NodeDB::Wire::Frame.parse_auth_code(body).should eq(11)
     String.new(NodeDB::Wire::Frame.auth_payload(body)).should eq("r=abc")
   end
+
+  it "raises ConnectionError on mid-frame EOF" do
+    raw = Bytes['Z'.ord.to_u8, 0_u8, 0_u8, 0_u8, 9_u8] # claims 5 body bytes, has none
+    expect_raises(NodeDB::ConnectionError, /mid-frame/) do
+      NodeDB::Wire::Frame.read(IO::Memory.new(raw))
+    end
+  end
+
+  it "raises ConnectionError on a truncated cstring in RowDescription" do
+    body = IO::Memory.new
+    body.write_bytes(1_i16, IO::ByteFormat::BigEndian)
+    body << "id" # no 0 terminator, then body ends
+    expect_raises(NodeDB::ConnectionError, /unterminated/) do
+      NodeDB::Wire::Frame.parse_row_description(body.to_slice)
+    end
+  end
+
+  it "writes a terminate frame" do
+    io = IO::Memory.new
+    NodeDB::Wire::Frame.write_terminate(io)
+    io.to_slice.should eq(Bytes['X'.ord.to_u8, 0_u8, 0_u8, 0_u8, 4_u8])
+  end
 end

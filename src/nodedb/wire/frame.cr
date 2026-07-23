@@ -40,9 +40,13 @@ module NodeDB
 
       def self.read(io : IO) : {Char, Bytes}
         type = io.read_byte || raise ConnectionError.new("server closed connection")
-        length = io.read_bytes(Int32, IO::ByteFormat::BigEndian)
-        body = Bytes.new(length - 4)
-        io.read_fully(body)
+        begin
+          length = io.read_bytes(Int32, IO::ByteFormat::BigEndian)
+          body = Bytes.new(length - 4)
+          io.read_fully(body)
+        rescue IO::EOFError
+          raise ConnectionError.new("server closed connection mid-frame")
+        end
         {type.chr, body}
       end
 
@@ -107,7 +111,10 @@ module NodeDB
 
       private def self.read_cstring(io : IO) : String
         String.build do |s|
-          while (byte = io.read_byte) && byte != 0
+          loop do
+            byte = io.read_byte
+            raise ConnectionError.new("malformed frame: unterminated string") if byte.nil?
+            break if byte == 0
             s.write_byte byte
           end
         end
